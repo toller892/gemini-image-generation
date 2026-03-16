@@ -96,6 +96,10 @@ echo "[viz] noVNC started on :${NOVNC_PORT} (PID $WS_PID)"
 echo "[viz] Launching Chromium with persistent profile: ${BROWSER_PROFILE}"
 mkdir -p "${BROWSER_PROFILE}"
 
+# Close any existing agent-browser daemon first (so new proxy settings take effect)
+agent-browser close > /dev/null 2>&1 || true
+sleep 1
+
 # Build agent-browser command with optional proxy
 AB_CMD="agent-browser --profile ${BROWSER_PROFILE} --headed"
 if [ -n "${GEMINI_PROXY:-}" ]; then
