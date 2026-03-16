@@ -1,280 +1,178 @@
 ---
 name: gemini-image-generation
-description: Use when user asks to generate images using Gemini's image generation feature (nano banana model), including logging in, selecting styles, and downloading generated images
+description: Use when user asks to generate images using Gemini's image generation feature (nano banana model). Provides live browser visualization via noVNC + Cloudflare Tunnel. User logs in manually once (persisted), then agent automates generation. Designed for cloud OpenClaw instances.
 ---
 
-# Gemini Image Generation
+# Gemini Image Generation (with Live Visualization)
 
 ## Overview
 
-**Use the agent-browser command-line tool to automate Gemini's image generation workflow.** Gemini has a built-in image generation model (nano banana) accessible through the "Create image" tool in the web UI.
+Automate Gemini's web-based image generation (nano banana model) with **real-time browser visualization**. A headless Chromium runs on a virtual display (Xvfb), accessible via noVNC through a temporary Cloudflare Tunnel public URL.
 
-**Critical:** This skill requires the agent-browser tool. All commands below use `agent-browser` CLI.
+- **First time:** User logs in to Gemini manually via noVNC link (login persisted via Chromium profile)
+- **After login:** Agent automates the full workflow (open → prompt → style → generate → download)
+- **Auto-shutdown:** 10 minutes of no noVNC connections → stack auto-terminates
+- **Cloud-native:** Designed for headless cloud servers (Zeabur, VPS, etc.)
 
-## When to Use
+## Architecture
 
-Use when:
-- User asks to generate images in Gemini
-- User mentions "nano banana" (Gemini's image generation model)
-- User wants to use Gemini's image creation feature
-- Task involves Gemini image generation with style selection
+```
+User's Browser ──HTTPS──▶ Cloudflare Quick Tunnel (random temporary URL)
+                              │
+                    websockify + noVNC (:6080)
+                              │
+                    x11vnc → Xvfb (:99) virtual display
+                              ▲
+                    Chromium (persistent profile at ~/.agent-browser/profiles/gemini)
+                              ▲
+                    agent-browser CLI (automates Gemini workflow)
+```
 
-Don't use for:
-- Other image generation services (DALL-E, Midjourney, etc.)
-- Gemini text chat without image generation
-- API-based image generation
+## Installation
+
+```bash
+# Install dependencies (run as root or with sudo)
+bash <skill_dir>/scripts/install-deps.sh
+
+# Install Chromium for agent-browser
+agent-browser install
+```
 
 ## Workflow
 
-```dot
-digraph gemini_image_gen {
-    "User logged in?" [shape=diamond];
-    "Open Gemini with session" [shape=box];
-    "Login manually" [shape=box];
-    "Save session state" [shape=box];
-    "Click Create image tool" [shape=box];
-    "Enter prompt" [shape=box];
-    "Select style from UI" [shape=box];
-    "Wait for generation" [shape=box];
-    "Download image" [shape=box];
-    "Done" [shape=doublecircle];
+### First-Time Setup (User Login)
 
-    "User logged in?" -> "Open Gemini with session" [label="yes"];
-    "User logged in?" -> "Login manually" [label="no"];
-    "Login manually" -> "Save session state";
-    "Save session state" -> "Click Create image tool";
-    "Open Gemini with session" -> "Click Create image tool";
-    "Click Create image tool" -> "Enter prompt";
-    "Enter prompt" -> "Select style from UI";
-    "Select style from UI" -> "Wait for generation";
-    "Wait for generation" -> "Download image";
-    "Download image" -> "Done";
-}
-```
-
-## Step-by-Step Guide
-
-### 1. Open Gemini with Session Persistence
+Only needed once. Login is persisted in Chromium profile at `~/.agent-browser/profiles/gemini`.
 
 ```bash
-# If user already logged in, use named session
-agent-browser --session-name gemini open "https://gemini.google.com"
-
-# If first time, use headed mode for manual login
-agent-browser --headed --session-name gemini open "https://gemini.google.com"
-# Wait for user to login, then session auto-saves
+bash <skill_dir>/scripts/start-viz.sh --login
 ```
 
-### 2. Find and Click "Create Image" Tool
+Send the output URL to the user:
+```
+🔐 Please login to Gemini:
+https://xxxxx.trycloudflare.com/vnc.html?autoconnect=true&resize=scale
 
+Your login will be saved — you won't need to do this again.
+```
+
+After user confirms login is done:
 ```bash
-agent-browser snapshot -i
-# Look for: button "🖼️ Create image" or similar
-agent-browser click @eN  # Click the Create image button
+bash <skill_dir>/scripts/stop-viz.sh
 ```
 
-### 3. Enter Image Prompt
+### Image Generation (Automated)
 
+#### Step 1: Start viz stack
 ```bash
-agent-browser wait 2000
-agent-browser snapshot -i
-# Look for: textbox "Enter a prompt for Gemini"
-agent-browser fill @eN "your image description here"
+bash <skill_dir>/scripts/start-viz.sh
 ```
+Send the noVNC URL to the user so they can watch live.
 
-### 4. Select Style from UI (Critical Step)
+#### Step 2: Automate with agent-browser
 
-**DO NOT put style in text prompt.** Styles are clickable UI elements.
-
-**Two approaches:**
-
-**A. User specifies style (if known):**
+Set environment:
 ```bash
-agent-browser snapshot -i -C  # Include cursor-interactive elements
-# Look for the specified style and click it
-agent-browser click @eN  # Click desired style
-agent-browser wait 2000  # Wait for style to register
+export DISPLAY=:99
+unset WAYLAND_DISPLAY HTTP_PROXY HTTPS_PROXY ALL_PROXY 2>/dev/null
+AB="agent-browser --profile ~/.agent-browser/profiles/gemini --headed"
 ```
 
-**B. Let user choose (recommended):**
+**Open Gemini (already logged in):**
 ```bash
-agent-browser snapshot -i -C
-# Extract all available styles and present to user
-# Example output:
-# Available styles:
-# 1. Monochrome (@e12)
-# 2. Color block (@e13)
-# 3. Cinematic (@e21)
-# 4. Oil painting (@e31)
-# ... etc
-
-# Ask user: "Which style would you like? (enter number or name)"
-# Then click the selected style
-agent-browser click @eN
-agent-browser wait 2000
+$AB open "https://gemini.google.com"
 ```
 
-**Getting style list programmatically:**
+**Click "Create image":**
 ```bash
-agent-browser snapshot -i -C | grep "clickable" | grep -v "button\|link\|textbox"
-# This shows all clickable style options with their refs
+$AB snapshot -i
+$AB click @eN  # Create image button
+$AB wait 2000
 ```
 
-**Common styles:**
-- Cinematic (photorealistic, dramatic)
-- Monochrome (black and white)
-- Oil painting (artistic)
-- Sketch (hand-drawn)
-- Technicolor (vibrant colors)
-
-### 5. Send Request
-
+**Enter prompt:**
 ```bash
-agent-browser snapshot -i
-# Look for: button "Send message"
-agent-browser click @eN
+$AB snapshot -i
+$AB fill @eN "image description"
 ```
 
-### 6. Wait for Generation
-
-Image generation takes 20-40 seconds. Wait adequately:
-
+**Select style (CRITICAL: must click UI element, NOT in prompt text):**
 ```bash
-agent-browser wait 30000  # Wait 30 seconds
-agent-browser snapshot -i
-# Look for: button "Download full size image"
+$AB snapshot -i -C
+# Present styles to user if not specified, then click
+$AB click @eN  # chosen style
+$AB wait 2000
 ```
 
-If still generating (button shows "Stop response"), wait longer:
+Common styles: Cinematic, Monochrome, Oil painting, Sketch, Technicolor, Color block
 
+**Send and wait:**
 ```bash
-agent-browser wait 20000
-agent-browser snapshot -i
+$AB snapshot -i
+$AB click @eN  # Send button
+$AB wait 30000
+$AB snapshot -i  # Check if still generating
 ```
 
-### 7. Download Image
-
+**Download:**
 ```bash
-agent-browser snapshot -i
-# Look for: button "Download full size image"
-agent-browser download @eN ./output-filename.png
+$AB snapshot -i
+$AB download @eN ./output.png
 ```
 
-## Complete Example
-
-### Example 1: User Chooses Style Interactively
-
+#### Step 3: Cleanup
 ```bash
-# Open with saved session
-agent-browser --session-name gemini open "https://gemini.google.com"
-
-# Click Create image tool
-agent-browser snapshot -i
-agent-browser click @e6  # Create image button
-
-# Enter prompt
-agent-browser wait 2000
-agent-browser snapshot -i
-agent-browser fill @e10 "一只可爱的猫咪坐在电脑前编程"
-
-# Get available styles and let user choose
-agent-browser snapshot -i -C > styles.txt
-# Parse and present styles to user:
-# "Available styles: Monochrome, Color block, Cinematic, Oil painting, Sketch..."
-# "Which style would you like?"
-
-# User selects "Cinematic"
-agent-browser click @e21  # Based on user's choice
-agent-browser wait 2000
-
-# Send request
-agent-browser snapshot -i
-agent-browser click @e13  # Send message button
-
-# Wait and download
-agent-browser wait 30000
-agent-browser snapshot -i
-agent-browser download @e12 ./cat-coding.png
+bash <skill_dir>/scripts/stop-viz.sh
 ```
+Or let idle watchdog auto-shutdown after 10 minutes.
 
-### Example 2: Style Pre-specified by User
+## Scripts
 
-```bash
-# User said: "Generate image with Oil painting style"
-agent-browser --session-name gemini open "https://gemini.google.com"
-agent-browser snapshot -i
-agent-browser click @e6
+| Script | Purpose |
+|---|---|
+| `scripts/install-deps.sh` | Install all dependencies (apt + npm + cloudflared) |
+| `scripts/start-viz.sh` | Start full stack (Xvfb + VNC + noVNC + Chromium + tunnel) |
+| `scripts/start-viz.sh --login` | Login mode — user logs in via noVNC |
+| `scripts/stop-viz.sh` | Stop all processes gracefully |
+| `scripts/idle-watchdog.py` | Auto-shutdown after N seconds of no connections |
 
-agent-browser wait 2000
-agent-browser snapshot -i
-agent-browser fill @e10 "一个机器人在花园里浇花"
+## Environment Variables
 
-# Find and click Oil painting style
-agent-browser snapshot -i -C
-agent-browser click @e31  # Oil painting
-agent-browser wait 2000
+| Var | Default | Description |
+|---|---|---|
+| `DISPLAY_NUM` | 99 | Virtual display number |
+| `VNC_PORT` | 5900 | x11vnc port |
+| `NOVNC_PORT` | 6080 | noVNC/websockify port |
+| `RESOLUTION` | 1280x720x24 | Virtual display resolution |
+| `IDLE_TIMEOUT` | 600 | Auto-shutdown timeout (seconds) |
+| `BROWSER_PROFILE` | `~/.agent-browser/profiles/gemini` | Chromium profile path |
 
-agent-browser snapshot -i
-agent-browser click @e13
+## Login Persistence
 
-agent-browser wait 30000
-agent-browser snapshot -i
-agent-browser download @e12 ./robot-garden.png
-```
+Login state is stored in a full Chromium profile at `~/.agent-browser/profiles/gemini`:
+- Cookies (Google login session)
+- localStorage / sessionStorage
+- Browser cache
 
-## Common Mistakes
+As long as this directory is intact, subsequent launches skip login.
 
-| Mistake | Fix |
-|---------|-----|
-| Putting style in text prompt | Use UI style picker with `snapshot -i -C` and click |
-| Not waiting after style click | Add `wait 2000` after clicking style before sending |
-| Not waiting long enough for generation | Wait at least 30 seconds after sending |
-| Forgetting session persistence | Use `--session-name` to avoid re-login |
-| Not using `-C` flag for styles | Styles are cursor-interactive, need `-C` flag |
-| Clicking before page loads | Add `wait 2000` after navigation/clicks |
-| Assuming generation started | Check for "Stop response" button or take screenshot to verify |
+To force re-login: `rm -rf ~/.agent-browser/profiles/gemini`
 
 ## Troubleshooting
 
-**"No style options visible":**
-- Use `agent-browser snapshot -i -C` to see cursor-interactive elements
-- Styles appear after clicking "Create image" tool
+**Browser not visible on noVNC:** Ensure `DISPLAY=:99` and `unset WAYLAND_DISPLAY`.
 
-**"Image not generating":**
-- Check if "Stop response" button exists (still generating)
-- Wait longer (up to 60 seconds for complex images)
-- Take screenshot to verify: `agent-browser screenshot status.png`
+**Login expired:** Run `start-viz.sh --login` again.
 
-**"Download button not found":**
-- Look for: "Download full size image" or "Copy image"
-- May need to scroll: `agent-browser scroll up 500`
+**Tunnel failed:** Check `/tmp/gemini-viz-tunnel.log`. May be temporary Cloudflare outage. Retry.
 
-**"Session lost":**
-- Re-login with `--headed` mode
-- Session auto-saves when using `--session-name`
+**Style not clicking:** Use `snapshot -i -C`. Styles only appear after clicking "Create image". Always `wait 2000` after clicking a style.
 
-**"Workflow seems stuck":**
-- Take screenshot: `agent-browser screenshot debug.png`
-- Check page text: `agent-browser get text body > page.txt`
-- If stuck on style selection screen, refresh: `agent-browser open "https://gemini.google.com/app"`
-- Start workflow from beginning
+**Dependencies missing:** Run `scripts/install-deps.sh` (may need root/sudo).
 
-## Session Management
+## Security
 
-**First time setup:**
-```bash
-agent-browser --headed --session-name gemini open "https://gemini.google.com"
-# User logs in manually
-agent-browser close  # Session auto-saved
-```
-
-**Subsequent uses:**
-```bash
-agent-browser --session-name gemini open "https://gemini.google.com"
-# Already logged in
-```
-
-**Check saved sessions:**
-```bash
-agent-browser state list
-```
+- Tunnel URL is random and temporary (Cloudflare Quick Tunnel)
+- 10-minute idle auto-shutdown limits exposure
+- No persistent public endpoint
+- Browser profile stored locally — login never leaves the server
