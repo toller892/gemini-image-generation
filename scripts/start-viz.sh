@@ -42,8 +42,16 @@ done
 export DISPLAY=":${DISPLAY_NUM}"
 unset WAYLAND_DISPLAY 2>/dev/null || true
 
-# Clear proxy variables — cloud servers connect directly
-unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy 2>/dev/null || true
+# Proxy: if GEMINI_PROXY is set, use it; otherwise clear all proxies (cloud default)
+if [ -n "${GEMINI_PROXY:-}" ]; then
+    export HTTP_PROXY="$GEMINI_PROXY"
+    export HTTPS_PROXY="$GEMINI_PROXY"
+    export http_proxy="$GEMINI_PROXY"
+    export https_proxy="$GEMINI_PROXY"
+    echo "[viz] Using proxy: $GEMINI_PROXY"
+else
+    unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy 2>/dev/null || true
+fi
 
 # ---- Cleanup any previous run ----
 if [ -f "$PID_FILE" ]; then
@@ -88,12 +96,14 @@ echo "[viz] noVNC started on :${NOVNC_PORT} (PID $WS_PID)"
 echo "[viz] Launching Chromium with persistent profile: ${BROWSER_PROFILE}"
 mkdir -p "${BROWSER_PROFILE}"
 
+# Build agent-browser command with optional proxy
+AB_CMD="agent-browser --profile ${BROWSER_PROFILE} --headed"
+if [ -n "${GEMINI_PROXY:-}" ]; then
+    AB_CMD="$AB_CMD --proxy ${GEMINI_PROXY}"
+fi
+
 # Use --profile for persistent login, --headed so it renders on Xvfb
-nohup agent-browser \
-    --profile "${BROWSER_PROFILE}" \
-    --headed \
-    open "${TARGET_URL}" \
-    > /tmp/gemini-viz-browser.log 2>&1 &
+nohup $AB_CMD open "${TARGET_URL}" > /tmp/gemini-viz-browser.log 2>&1 &
 BROWSER_PID=$!
 disown $BROWSER_PID
 echo "$BROWSER_PID" >> "$PID_FILE"

@@ -146,6 +146,17 @@ Or let idle watchdog auto-shutdown after 10 minutes.
 | `RESOLUTION` | 1280x720x24 | Virtual display resolution |
 | `IDLE_TIMEOUT` | 600 | Auto-shutdown timeout (seconds) |
 | `BROWSER_PROFILE` | `~/.agent-browser/profiles/gemini` | Chromium profile path |
+| `GEMINI_PROXY` | (unset) | Proxy for Chromium (e.g. `http://127.0.0.1:7897`) |
+
+### Local vs Cloud
+
+- **Cloud (Zeabur, VPS):** Leave `GEMINI_PROXY` unset — direct connection to Google
+- **Local (WSL, China):** Set `GEMINI_PROXY` to your proxy (Clash, etc.)
+
+Example for local:
+```bash
+GEMINI_PROXY=http://127.0.0.1:7897 bash <skill_dir>/scripts/start-viz.sh --login
+```
 
 ## Login Persistence
 
